@@ -3,27 +3,68 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Maui.Controls;
-using Microsoft.Maui.Controls.Xaml;
 using Group_2.Models;
 using Group_2.Services;
-using System.Collections; // tarvitaan SelectedItems tyhjentämiseen
+using System.Collections;
+using System.ComponentModel;
+using System.Globalization;
 
 namespace Group_2
 {
-    public partial class AdminPanelPage : ContentPage
+    public partial class AdminPanelPage : ContentPage, INotifyPropertyChanged
     {
-        ObservableCollection<Event> events = new();
-        ObservableCollection<User> users = new();
-        Event? selectedEvent;
-        User? selectedUser;
+        public ObservableCollection<Event> events { get; } = new();
+        public ObservableCollection<User> users { get; } = new();
+
+        private Event? selectedEvent;
+        private User? selectedUser;
+        private ObservableCollection<User> selectedUsers = new();
+
+        public Event? SelectedEvent
+        {
+            get => selectedEvent;
+            set
+            {
+                if (selectedEvent != value)
+                {
+                    selectedEvent = value;
+                    OnPropertyChanged(nameof(SelectedEvent));
+                }
+            }
+        }
+        public User? SelectedUser
+        {
+            get => selectedUser;
+            set
+            {
+                if (selectedUser != value)
+                {
+                    selectedUser = value;
+                    OnPropertyChanged(nameof(SelectedUser));
+                }
+            }
+        }
+
+        public ObservableCollection<User> SelectedUsers
+        {
+            get => selectedUsers;
+            set
+            {
+                if (selectedUsers != value)
+                {
+                    selectedUsers = value;
+                    OnPropertyChanged(nameof(SelectedUsers));
+                }
+            }
+        }
+
+        public bool IsEventView => TypePicker?.SelectedIndex == 0;
+        public bool IsUserView => TypePicker?.SelectedIndex == 1;
 
         public AdminPanelPage()
         {
             InitializeComponent();
-
-            // Varmista, että nämä nimet vastaavat XAML:ää
-            EventsList.ItemsSource = events;
-            UsersList.ItemsSource = users;
+            BindingContext = this;
             TypePicker.SelectedIndex = 0;
             _ = LoadData();
         }
@@ -31,12 +72,19 @@ namespace Group_2
         async Task LoadData()
         {
             var evs = await DatabaseService.LoadEventsAsync();
-            events.Clear();
-            foreach (var e in evs) events.Add(e);
-
             var us = await DatabaseService.LoadUsersAsync();
             users.Clear();
             foreach (var u in us) users.Add(u);
+
+            events.Clear();
+            foreach (var e in evs)
+            {
+                var names = e.ParticipantIds != null
+                    ? string.Join(", ", e.ParticipantIds.Select(id => users.FirstOrDefault(u => u.Id == id)?.Name).Where(n => !string.IsNullOrEmpty(n)))
+                    : "";
+                e.ParticipantsDisplay = string.IsNullOrEmpty(names) ? "Ei osallistujia" : $"Osallistujat: {names}";
+                events.Add(e);
+            }
 
             UpdateEmptyLabel();
         }
@@ -49,31 +97,32 @@ namespace Group_2
 
         void UpdateEmptyLabel()
         {
-            var showingEvents = EventsList.IsVisible;
+            var showingEvents = TypePicker.SelectedIndex == 0;
             var hasItems = showingEvents ? events.Any() : users.Any();
             EmptyLabel.IsVisible = !hasItems;
         }
 
         void OnTypeChanged(object sender, EventArgs e)
         {
-            var selected = TypePicker.SelectedIndex;
-            EventsList.IsVisible = selected == 0;
-            UsersList.IsVisible = selected == 1;
+            OnPropertyChanged(nameof(IsEventView));
+            OnPropertyChanged(nameof(IsUserView));
             UpdateEmptyLabel();
             SearchBar.Text = string.Empty;
         }
 
         async void OnAddClicked(object sender, EventArgs e)
         {
-            if (EventsList.IsVisible)
+            if (IsEventView)
             {
                 var title = await DisplayPromptAsync("Uusi tapahtuma", "Otsikko:");
                 if (string.IsNullOrWhiteSpace(title)) return;
                 var subtitle = await DisplayPromptAsync("Uusi tapahtuma", "Kuvaus:");
-                var ev = new Event { Title = title.Trim(), Subtitle = subtitle?.Trim() ?? string.Empty };
+                var date = await DisplayPromptAsync("Uusi tapahtuma", "Päivämäärä (pp.kk.vvvv):");
+                if (!DateTime.TryParse(date, out var eventDate)) eventDate = DateTime.Today;
+                var ev = new Event { Title = title.Trim(), Subtitle = subtitle?.Trim() ?? string.Empty, Date = eventDate };
                 events.Add(ev);
             }
-            else
+            else if (IsUserView)
             {
                 var name = await DisplayPromptAsync("Uusi käyttäjä", "Nimi:");
                 if (string.IsNullOrWhiteSpace(name)) return;
@@ -88,76 +137,71 @@ namespace Group_2
 
         async void OnDeleteClicked(object sender, EventArgs e)
         {
-            if (EventsList.IsVisible && selectedEvent != null)
+            if (IsEventView && SelectedEvent != null)
             {
-                var confirm = await DisplayAlert("Poista", $"Poistetaanko '{selectedEvent.Title}'?", "Kyllä", "Ei");
+                var confirm = await DisplayAlert("Poista", $"Poistetaanko '{SelectedEvent.Title}'?", "Kyllä", "Ei");
                 if (confirm)
                 {
-                    events.Remove(selectedEvent);
-                    selectedEvent = null;
+                    events.Remove(SelectedEvent);
+                    SelectedEvent = null;
                     UpdateEmptyLabel();
                     await SaveAll();
                 }
             }
-            else if (UsersList.IsVisible && selectedUser != null)
+            else if (IsUserView && SelectedUser != null)
             {
-                var confirm = await DisplayAlert("Poista", $"Poistetaanko '{selectedUser.Name}'?", "Kyllä", "Ei");
+                var confirm = await DisplayAlert("Poista", $"Poistetaanko '{SelectedUser.Name}'?", "Kyllä", "Ei");
                 if (confirm)
                 {
-                    users.Remove(selectedUser);
-                    selectedUser = null;
+                    users.Remove(SelectedUser);
+                    SelectedUser = null;
                     UpdateEmptyLabel();
                     await SaveAll();
                 }
             }
-
-            EventsList.SelectedItem = null;
-            if (UsersList.SelectedItems is IList selectedItems)
-                selectedItems.Clear();
         }
 
         async void OnEditClicked(object sender, EventArgs e)
         {
-            if (EventsList.IsVisible && selectedEvent != null)
+            if (IsEventView && SelectedEvent != null)
             {
-                var title = await DisplayPromptAsync("Muokkaa tapahtumaa", "Otsikko:", initialValue: selectedEvent.Title);
+                var title = await DisplayPromptAsync("Muokkaa tapahtumaa", "Otsikko:", initialValue: SelectedEvent.Title);
                 if (title == null) return;
-                var subtitle = await DisplayPromptAsync("Muokkaa tapahtumaa", "Kuvaus:", initialValue: selectedEvent.Subtitle);
-                selectedEvent.Title = title.Trim();
-                selectedEvent.Subtitle = subtitle?.Trim() ?? string.Empty;
-                var idx = events.IndexOf(selectedEvent);
-                if (idx >= 0) events[idx] = selectedEvent;
+                var subtitle = await DisplayPromptAsync("Muokkaa tapahtumaa", "Kuvaus:", initialValue: SelectedEvent.Subtitle);
+                SelectedEvent.Title = title.Trim();
+                SelectedEvent.Subtitle = subtitle?.Trim() ?? string.Empty;
+                var idx = events.IndexOf(SelectedEvent);
+                if (idx >= 0) events[idx] = SelectedEvent;
                 await SaveAll();
             }
-            else if (UsersList.IsVisible && selectedUser != null)
+            else if (IsUserView && SelectedUser != null)
             {
-                var name = await DisplayPromptAsync("Muokkaa käyttäjää", "Nimi:", initialValue: selectedUser.Name);
+                var name = await DisplayPromptAsync("Muokkaa käyttäjää", "Nimi:", initialValue: SelectedUser.Name);
                 if (name == null) return;
-                var email = await DisplayPromptAsync("Muokkaa käyttäjää", "Sähköposti:", initialValue: selectedUser.Email);
-                selectedUser.Name = name.Trim();
-                selectedUser.Email = email?.Trim() ?? string.Empty;
-                var idx = users.IndexOf(selectedUser);
-                if (idx >= 0) users[idx] = selectedUser;
+                var email = await DisplayPromptAsync("Muokkaa käyttäjää", "Sähköposti:", initialValue: SelectedUser.Email);
+                SelectedUser.Name = name.Trim();
+                SelectedUser.Email = email?.Trim() ?? string.Empty;
+                var idx = users.IndexOf(SelectedUser);
+                if (idx >= 0) users[idx] = SelectedUser;
                 await SaveAll();
             }
-
-            EventsList.SelectedItem = null;
-            if (UsersList.SelectedItems is IList selectedItems)
-                selectedItems.Clear();
         }
 
         void OnSearchTextChanged(object sender, TextChangedEventArgs e)
         {
             var text = e.NewTextValue?.Trim().ToLower() ?? string.Empty;
-            if (EventsList.IsVisible)
+            if (IsEventView)
             {
-                EventsList.ItemsSource = string.IsNullOrWhiteSpace(text)
-                    ? events
-                    : new ObservableCollection<Event>(events.Where(x =>
-                        (x.Title ?? string.Empty).ToLower().Contains(text) ||
-                        (x.Subtitle ?? string.Empty).ToLower().Contains(text)));
+                foreach (var ev in events)
+                {
+                    ev.IsVisible = string.IsNullOrWhiteSpace(text) ||
+                        (ev.Title ?? string.Empty).ToLower().Contains(text) ||
+                        (ev.Subtitle ?? string.Empty).ToLower().Contains(text);
+                }
+                // If your UI binds to events directly, ensure your CollectionView/ListView uses a CollectionViewSource or similar to filter by IsVisible
+                // Or, alternatively, update the ItemsSource to a filtered collection here
             }
-            else
+            else if (IsUserView)
             {
                 UsersList.ItemsSource = string.IsNullOrWhiteSpace(text)
                     ? users
@@ -171,18 +215,22 @@ namespace Group_2
 
         void OnEventSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            selectedEvent = e.CurrentSelection.FirstOrDefault() as Event;
+            SelectedEvent = e.CurrentSelection.FirstOrDefault() as Event;
         }
 
         void OnUserSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            selectedUser = e.CurrentSelection.FirstOrDefault() as User;
+            SelectedUser = e.CurrentSelection.FirstOrDefault() as User;
+            if (UsersList.SelectedItems is IList selectedItems)
+            {
+                SelectedUsers = new ObservableCollection<User>(selectedItems.Cast<User>());
+            }
         }
 
         private async void OnAddParticipantsClicked(object sender, EventArgs e)
         {
-            var selectedEvent = EventsList.SelectedItem as Event;
-            var selectedUsers = UsersList.SelectedItems?.Cast<User>().ToList() ?? new();
+            var selectedEvent = SelectedEvent;
+            var selectedUsers = SelectedUsers?.ToList() ?? new();
 
             if (selectedEvent == null || !selectedUsers.Any())
             {
@@ -192,14 +240,100 @@ namespace Group_2
 
             foreach (var user in selectedUsers)
             {
-                if (selectedEvent.ParticipantIds == null)
-                    selectedEvent.ParticipantIds = new List<Guid>();
                 if (!selectedEvent.ParticipantIds.Contains(user.Id))
                     selectedEvent.ParticipantIds.Add(user.Id);
+            }
+
+            var names = selectedEvent.ParticipantIds != null
+                ? string.Join(", ", selectedEvent.ParticipantIds.Select(id => users.FirstOrDefault(u => u.Id == id)?.Name).Where(n => !string.IsNullOrEmpty(n)))
+                : "";
+            selectedEvent.ParticipantsDisplay = string.IsNullOrEmpty(names) ? "Ei osallistujia" : $"Osallistujat: {names}";
+
+            var idx = events.IndexOf(selectedEvent);
+            if (idx >= 0)
+            {
+                events[idx] = selectedEvent;
             }
 
             await SaveAll();
             await DisplayAlert("Onnistui", "Osallistujat lisätty tapahtumaan.", "OK");
         }
+
+        private async void OnEditParticipantsClicked(object sender, EventArgs e)
+        {
+            if (SelectedEvent == null)
+            {
+                await DisplayAlert("Virhe", "Valitse muokattava tapahtuma.", "OK");
+                return;
+            }
+
+            var selectedIds = SelectedEvent.ParticipantIds ?? new List<Guid>();
+            var newIds = await ShowParticipantSelectionDialogAsync(selectedIds);
+
+            SelectedEvent.ParticipantIds = newIds;
+            var names = newIds.Any()
+                ? string.Join(", ", newIds.Select(id => users.FirstOrDefault(u => u.Id == id)?.Name).Where(n => !string.IsNullOrEmpty(n)))
+                : "";
+            SelectedEvent.ParticipantsDisplay = string.IsNullOrEmpty(names) ? "Ei osallistujia" : $"Osallistujat: {names}";
+
+            var idx = events.IndexOf(SelectedEvent);
+            if (idx >= 0) events[idx] = SelectedEvent;
+            await SaveAll();
+        }
+
+        private async Task<List<Guid>> ShowParticipantSelectionDialogAsync(List<Guid> currentParticipantIds)
+        {
+            var page = new ContentPage { Title = "Valitse osallistujat" };
+            var selectedIds = new HashSet<Guid>(currentParticipantIds);
+
+            var collectionView = new CollectionView
+            {
+                ItemsSource = users,
+                SelectionMode = SelectionMode.Multiple,
+                ItemTemplate = new DataTemplate(() =>
+                {
+                    var label = new Label();
+                    label.SetBinding(Label.TextProperty, nameof(User.Name));
+                    return new StackLayout { Children = { label }, Padding = new Thickness(10) };
+                }),
+            };
+
+            collectionView.SelectedItems = users.Where(u => selectedIds.Contains(u.Id)).Cast<object>().ToList();
+
+            var okButton = new Button { Text = "OK" };
+            okButton.Clicked += async (s, e) =>
+            {
+                await page.Navigation.PopModalAsync();
+            };
+
+            page.Content = new StackLayout
+            {
+                Padding = 20,
+                Children = { collectionView, okButton }
+            };
+
+            await Navigation.PushModalAsync(page);
+
+            var tcs = new TaskCompletionSource<object?>();
+            page.Disappearing += (s, e2) => tcs.TrySetResult(null);
+            await tcs.Task;
+
+            return collectionView.SelectedItems.Cast<User>().Select(u => u.Id).ToList();
+        }
+
+        public new event PropertyChangedEventHandler? PropertyChanged;
+        protected new void OnPropertyChanged(string propertyName)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+    }
+
+    public class NullToBoolConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            => value != null;
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            => throw new NotImplementedException();
     }
 }
