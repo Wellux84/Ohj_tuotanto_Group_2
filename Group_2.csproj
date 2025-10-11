@@ -72,5 +72,11 @@
 		<PackageReference Include="SQLitePCLRaw.bundle_green" Version="2.1.10" />
 		<PackageReference Include="Syncfusion.Maui.Toolkit" Version="1.0.5" />
 	</ItemGroup>
+
+	<ItemGroup>
+	  <MauiXaml Update="AdminPanelPage.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	</ItemGroup>
 	
 </Project>

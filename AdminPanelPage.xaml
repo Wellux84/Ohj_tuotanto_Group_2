@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:models="clr-namespace:Group_2.Models"
+             x:Class="Group_2.AdminPanelPage"
+             Title="Hallintapaneeli">
+    <VerticalStackLayout Padding="16" Spacing="12">
+
+        <HorizontalStackLayout Spacing="8">
+            <Button Text="Muokkaa" Clicked="OnEditClicked" />
+            <Button Text="Lisää" Clicked="OnAddClicked" />
+            <Button Text="Poista" Clicked="OnDeleteClicked" />
+            <Picker x:Name="TypePicker" Title="Näytä" SelectedIndexChanged="OnTypeChanged" WidthRequest="140">
+                <Picker.Items>
+                    <x:String>Tapahtumat</x:String>
+                    <x:String>Käyttäjät</x:String>
+                </Picker.Items>
+            </Picker>
+        </HorizontalStackLayout>
+
+        <SearchBar x:Name="SearchBar" Placeholder="Hae..." TextChanged="OnSearchTextChanged" />
+
+        <!-- Tapahtumat -->
+        <CollectionView x:Name="EventsList" SelectionMode="Single" IsVisible="True" SelectionChanged="OnEventSelectionChanged">
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:Event">
+                    <Border Padding="10" Margin="4" Stroke="#DDD">
+                        <Grid ColumnDefinitions="*,auto" RowDefinitions="Auto,Auto">
+                            <Label Grid.Row="0" Grid.Column="0" Text="{Binding Title}" FontAttributes="Bold" />
+                            <Label Grid.Row="1" Grid.Column="0" Text="{Binding Subtitle}" FontSize="12" TextColor="#666" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+        <!-- Käyttäjät -->
+        <CollectionView x:Name="UsersList" SelectionMode="Single" IsVisible="False" SelectionChanged="OnUserSelectionChanged">
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:User">
+                    <Border Padding="10" Margin="4" Stroke="#DDD">
+                        <Grid ColumnDefinitions="*,auto" RowDefinitions="Auto,Auto">
+                            <Label Grid.Row="0" Grid.Column="0" Text="{Binding Name}" FontAttributes="Bold" />
+                            <Label Grid.Row="1" Grid.Column="0" Text="{Binding Email}" FontSize="12" TextColor="#666" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+        <Label x:Name="EmptyLabel" Text="Ei tietoja" IsVisible="False" HorizontalOptions="Center" />
+
+    </VerticalStackLayout>
+</ContentPage>
