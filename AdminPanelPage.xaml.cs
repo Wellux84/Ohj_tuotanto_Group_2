@@ -3,8 +3,10 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Maui.Controls;
+using Microsoft.Maui.Controls.Xaml;
 using Group_2.Models;
 using Group_2.Services;
+using System.Collections; // tarvitaan SelectedItems tyhjent‰miseen
 
 namespace Group_2
 {
@@ -18,6 +20,8 @@ namespace Group_2
         public AdminPanelPage()
         {
             InitializeComponent();
+
+            // Varmista, ett‰ n‰m‰ nimet vastaavat XAML:‰‰
             EventsList.ItemsSource = events;
             UsersList.ItemsSource = users;
             TypePicker.SelectedIndex = 0;
@@ -106,6 +110,10 @@ namespace Group_2
                     await SaveAll();
                 }
             }
+
+            EventsList.SelectedItem = null;
+            if (UsersList.SelectedItems is IList selectedItems)
+                selectedItems.Clear();
         }
 
         async void OnEditClicked(object sender, EventArgs e)
@@ -132,6 +140,10 @@ namespace Group_2
                 if (idx >= 0) users[idx] = selectedUser;
                 await SaveAll();
             }
+
+            EventsList.SelectedItem = null;
+            if (UsersList.SelectedItems is IList selectedItems)
+                selectedItems.Clear();
         }
 
         void OnSearchTextChanged(object sender, TextChangedEventArgs e)
@@ -165,6 +177,29 @@ namespace Group_2
         void OnUserSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             selectedUser = e.CurrentSelection.FirstOrDefault() as User;
+        }
+
+        private async void OnAddParticipantsClicked(object sender, EventArgs e)
+        {
+            var selectedEvent = EventsList.SelectedItem as Event;
+            var selectedUsers = UsersList.SelectedItems?.Cast<User>().ToList() ?? new();
+
+            if (selectedEvent == null || !selectedUsers.Any())
+            {
+                await DisplayAlert("Virhe", "Valitse tapahtuma ja v‰hint‰‰n yksi k‰ytt‰j‰.", "OK");
+                return;
+            }
+
+            foreach (var user in selectedUsers)
+            {
+                if (selectedEvent.ParticipantIds == null)
+                    selectedEvent.ParticipantIds = new List<Guid>();
+                if (!selectedEvent.ParticipantIds.Contains(user.Id))
+                    selectedEvent.ParticipantIds.Add(user.Id);
+            }
+
+            await SaveAll();
+            await DisplayAlert("Onnistui", "Osallistujat lis‰tty tapahtumaan.", "OK");
         }
     }
 }
