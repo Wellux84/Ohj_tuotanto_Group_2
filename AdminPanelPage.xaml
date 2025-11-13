@@ -5,11 +5,13 @@
              x:Class="Group_2.AdminPanelPage">
 
     <ContentPage.Resources>
+        <!-- Varmista että sinulla on public-luokka Group_2.NullToBoolConverter -->
         <local:NullToBoolConverter x:Key="NullToBoolConverter"/>
         <Style TargetType="Entry">
             <Setter Property="Margin" Value="0,4"/>
         </Style>
     </ContentPage.Resources>
+
     <StackLayout Padding="16" Spacing="12">
 
         <Picker x:Name="TypePicker"
@@ -36,14 +38,14 @@
                         SelectionChanged="OnEventSelectionChanged">
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Frame BorderColor="LightGray" Margin="0,4" Padding="8">
+                    <Border Stroke="LightGray" StrokeThickness="1" Margin="0,4" Padding="8" StrokeShape="Rectangle">
                         <StackLayout>
                             <Label Text="{Binding Title}" FontAttributes="Bold" FontSize="18"/>
                             <Label Text="{Binding Subtitle}" FontSize="14"/>
                             <Label Text="{Binding Date, StringFormat='{}{0:dd.MM.yyyy}'}" FontSize="12"/>
                             <Label Text="{Binding ParticipantsDisplay}" FontSize="12" TextColor="Gray"/>
                         </StackLayout>
-                    </Frame>
+                    </Border>
                 </DataTemplate>
             </CollectionView.ItemTemplate>
         </CollectionView>
@@ -56,12 +58,12 @@
                         SelectionChanged="OnUserSelectionChanged">
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Frame BorderColor="LightGray" Margin="0,4" Padding="8">
+                    <Border Stroke="LightGray" StrokeThickness="1" Margin="0,4" Padding="8" StrokeShape="Rectangle">
                         <StackLayout>
                             <Label Text="{Binding Name}" FontAttributes="Bold" FontSize="16"/>
                             <Label Text="{Binding Email}" FontSize="12"/>
                         </StackLayout>
-                    </Frame>
+                    </Border>
                 </DataTemplate>
             </CollectionView.ItemTemplate>
         </CollectionView>
@@ -70,10 +72,19 @@
 
         <StackLayout Orientation="Horizontal" Spacing="8" HorizontalOptions="Center">
             <Button Text="Lisää" Clicked="OnAddClicked"/>
-            <Button Text="Muokkaa" Clicked="OnEditClicked" IsEnabled="{Binding SelectedEvent, Converter={StaticResource NullToBoolConverter}}"/>
-            <Button Text="Poista" Clicked="OnDeleteClicked" IsEnabled="{Binding SelectedEvent, Converter={StaticResource NullToBoolConverter}}"/>
-            <Button Text="Lisää osallistujia" Clicked="OnAddParticipantsClicked" IsEnabled="{Binding SelectedEvent, Converter={StaticResource NullToBoolConverter}}"/>
-            <Button Text="Muokkaa osallistujia" Clicked="OnEditParticipantsClicked" IsEnabled="{Binding SelectedEvent, Converter={StaticResource NullToBoolConverter}}"/>
+            <Button Text="Muokkaa"
+                    Clicked="OnEditClicked"
+                    IsEnabled="{Binding SelectedEvent, Converter={StaticResource NullToBoolConverter}}"/>
+            <Button Text="Poista"
+                    Clicked="OnDeleteClicked"
+                    IsEnabled="{Binding SelectedEvent, Converter={StaticResource NullToBoolConverter}}"/>
+            <Button Text="Lisää osallistujia"
+                    Clicked="OnAddParticipantsClicked"
+                    IsEnabled="{Binding SelectedEvent, Converter={StaticResource NullToBoolConverter}}"/>
+            <Button Text="Muokkaa osallistujia"
+                    Clicked="OnEditParticipantsClicked"
+                    IsEnabled="{Binding SelectedEvent, Converter={StaticResource NullToBoolConverter}}"/>
         </StackLayout>
+
     </StackLayout>
 </ContentPage>

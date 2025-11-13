@@ -3,11 +3,14 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Maui.Controls;
+using Microsoft.Maui.ApplicationModel;
 using Group_2.Models;
 using Group_2.Services;
 using System.Collections;
 using System.ComponentModel;
 using System.Globalization;
+using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace Group_2
 {
@@ -28,7 +31,7 @@ namespace Group_2
                 if (selectedEvent != value)
                 {
                     selectedEvent = value;
-                    OnPropertyChanged(nameof(SelectedEvent));
+                    base.OnPropertyChanged(nameof(SelectedEvent));
                 }
             }
         }
@@ -40,7 +43,7 @@ namespace Group_2
                 if (selectedUser != value)
                 {
                     selectedUser = value;
-                    OnPropertyChanged(nameof(SelectedUser));
+                    base.OnPropertyChanged(nameof(SelectedUser));
                 }
             }
         }
@@ -53,47 +56,221 @@ namespace Group_2
                 if (selectedUsers != value)
                 {
                     selectedUsers = value;
-                    OnPropertyChanged(nameof(SelectedUsers));
+                    base.OnPropertyChanged(nameof(SelectedUsers));
                 }
             }
         }
 
-        public bool IsEventView => TypePicker?.SelectedIndex == 0;
-        public bool IsUserView => TypePicker?.SelectedIndex == 1;
+        public bool IsEventView => (TypePicker?.SelectedIndex ?? 0) == 0;
+        public bool IsUserView => (TypePicker?.SelectedIndex ?? 0) == 1;
+
 
         public AdminPanelPage()
         {
-            InitializeComponent();
+            try
+            {
+                InitializeComponent();
+            }
+            catch (Exception ex)
+            {
+                // ƒLƒ yrit‰ DisplayAlertia t‰ss‰ ñ MainPage ei ole viel‰ n‰kyviss‰.
+                // N‰ytet‰‰n virheteksti suoraan sivun sis‰ltˆn‰ ja poistutaan.
+                Content = new ScrollView
+                {
+                    Padding = 16,
+                    Content = new Label
+                    {
+                        Text = "XAML INIT FAIL:\n\n" + ex.ToString(),
+                        FontSize = 12
+                    }
+                };
+                return;
+            }
+
             BindingContext = this;
-            TypePicker.SelectedIndex = 0;
-            _ = LoadData();
+
+            // Aseta Picker vasta kun XAML on varmasti ladattu
+            Dispatcher.Dispatch(() =>
+            {
+                if (TypePicker != null) TypePicker.SelectedIndex = 0;
+            });
+        }
+
+
+
+        protected override async void OnAppearing()
+        {
+            base.OnAppearing();
+            try
+            {
+                // Run quick connection test first to show full error if it fails
+                var connError = await DatabaseService.TestConnectionAsync();
+                if (connError != null)
+                {
+                    System.Diagnostics.Debug.WriteLine("DB TestConnection failed:\n" + connError);
+                    await ShowExceptionDialogAsync("DB connection failed", connError);
+                    return;
+                }
+
+                // Ensure schema and load data at startup (must be enabled for load to work)
+                await DatabaseService.EnsureSchemaAsync();
+                await LoadData();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("OnAppearing exception:\n" + ex);
+                await ShowExceptionDialogAsync("DB-yhteysvirhe", ex.ToString());
+            }
         }
 
         async Task LoadData()
         {
-            var evs = await DatabaseService.LoadEventsAsync();
-            var us = await DatabaseService.LoadUsersAsync();
-            users.Clear();
-            foreach (var u in us) users.Add(u);
-
-            events.Clear();
-            foreach (var e in evs)
+            try
             {
-                var names = e.ParticipantIds != null
-                    ? string.Join(", ", e.ParticipantIds.Select(id => users.FirstOrDefault(u => u.Id == id)?.Name).Where(n => !string.IsNullOrEmpty(n)))
-                    : "";
-                e.ParticipantsDisplay = string.IsNullOrEmpty(names) ? "Ei osallistujia" : $"Osallistujat: {names}";
-                events.Add(e);
-            }
+                var evs = await DatabaseService.LoadEventsAsync();
+                var us = await DatabaseService.LoadUsersAsync();
 
-            UpdateEmptyLabel();
+                users.Clear();
+                foreach (var u in us) users.Add(u);
+
+                events.Clear();
+                foreach (var e in evs)
+                {
+                    // Ensure ParticipantIds is non-null
+                    if (e.ParticipantIds == null)
+                        e.ParticipantIds = new List<Guid>();
+
+                    var participantCount = e.ParticipantIds.Count;
+
+                    // Simple Finnish pluralization: 0 => "Ei osallistujia", 1 => "1 osallistuja", else "N osallistujaa"
+                    if (participantCount == 0)
+                        e.ParticipantsDisplay = "Ei osallistujia";
+                    else if (participantCount == 1)
+                        e.ParticipantsDisplay = "1 osallistuja";
+                    else
+                        e.ParticipantsDisplay = $"{participantCount} osallistujaa";
+
+                    // ensure visible flag default is true so UI shows items
+                    e.IsVisible = true;
+
+                    events.Add(e);
+                }
+
+                Debug.WriteLine($"LoadData: loaded {users.Count} users and {events.Count} events.");
+
+                // Force refresh CollectionView to pick up updated ParticipantsDisplay
+                EventsList.ItemsSource = null;
+                EventsList.ItemsSource = events;
+
+                UpdateEmptyLabel();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("LoadData exception: " + ex);
+                await ShowExceptionDialogAsync("LoadData failed", ex.ToString());
+            }
         }
+
 
         async Task SaveAll()
         {
-            await DatabaseService.SaveEventsAsync(events.ToList());
-            await DatabaseService.SaveUsersAsync(users.ToList());
+            try
+            {
+                // debug: log events and participant counts before saving
+                Debug.WriteLine("Saving events/users. Current in-memory event participant state:");
+                foreach (var ev in events)
+                {
+                    var ids = ev.ParticipantIds ?? new List<Guid>();
+                    Debug.WriteLine($"Event {ev.Id} '{ev.Title}' -> {ids.Count} participants: {string.Join(", ", ids)}");
+                }
+
+                // Save users first (FK targets), then events (event rows + per-event joins)
+                await DatabaseService.SaveUsersAsync(users.ToList());
+                await DatabaseService.SaveEventsAsync(events.ToList());
+
+                // Reload from DB so in-memory state exactly matches DB
+                await LoadData();
+
+                // debug: show join rows after save
+                try
+                {
+                    var joins = await DatabaseService.LoadJoinsAsync();
+                    Debug.WriteLine("ilmoittautuminen rows after save: " + (joins.Any() ? string.Join("; ", joins.Select(j => $"{j.EventId}/{j.UserId}")) : "(no rows)"));
+                }
+                catch (Exception dbgEx)
+                {
+                    Debug.WriteLine("LoadJoinsAsync failed: " + dbgEx);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("SaveAll exception:\n" + ex);
+                await ShowExceptionDialogAsync("Tallennus ep‰onnistui", ex.ToString());
+            }
         }
+
+
+        // New helper: modal dialog with copy-to-clipboard (kept from previous change)
+        private async Task ShowExceptionDialogAsync(string title, string message)
+        {
+            var editor = new Editor
+            {
+                Text = message ?? string.Empty,
+                IsReadOnly = true,
+                FontSize = 12,
+                HeightRequest = 300
+            };
+
+            var titleLabel = new Label
+            {
+                Text = title,
+                FontAttributes = FontAttributes.Bold,
+                FontSize = 16
+            };
+
+            var copyButton = new Button { Text = "Copy" };
+            copyButton.Clicked += async (_, __) =>
+            {
+                try
+                {
+                    await Clipboard.Default.SetTextAsync(message ?? string.Empty);
+                    await DisplayAlert("Copied", "Exception text copied to clipboard.", "OK");
+                }
+                catch (Exception ex)
+                {
+                    await DisplayAlert("Copy failed", ex.Message, "OK");
+                }
+            };
+
+            var closeButton = new Button { Text = "Close" };
+            closeButton.Clicked += async (_, __) => await Navigation.PopModalAsync();
+
+            var buttons = new StackLayout
+            {
+                Orientation = StackOrientation.Horizontal,
+                Spacing = 12,
+                HorizontalOptions = LayoutOptions.Center,
+                Children = { copyButton, closeButton }
+            };
+
+            var page = new ContentPage
+            {
+                Title = title,
+                Content = new StackLayout
+                {
+                    Padding = 20,
+                    Children =
+                    {
+                        titleLabel,
+                        new ScrollView { Content = editor, HeightRequest = 300 },
+                        buttons
+                    }
+                }
+            };
+
+            await Navigation.PushModalAsync(page);
+        }
+
 
         void UpdateEmptyLabel()
         {
@@ -104,8 +281,8 @@ namespace Group_2
 
         void OnTypeChanged(object sender, EventArgs e)
         {
-            OnPropertyChanged(nameof(IsEventView));
-            OnPropertyChanged(nameof(IsUserView));
+            base.OnPropertyChanged(nameof(IsEventView));
+            base.OnPropertyChanged(nameof(IsUserView));
             UpdateEmptyLabel();
             SearchBar.Text = string.Empty;
         }
@@ -119,7 +296,16 @@ namespace Group_2
                 var subtitle = await DisplayPromptAsync("Uusi tapahtuma", "Kuvaus:");
                 var date = await DisplayPromptAsync("Uusi tapahtuma", "P‰iv‰m‰‰r‰ (pp.kk.vvvv):");
                 if (!DateTime.TryParse(date, out var eventDate)) eventDate = DateTime.Today;
-                var ev = new Event { Title = title.Trim(), Subtitle = subtitle?.Trim() ?? string.Empty, Date = eventDate };
+
+                var ev = new Event
+                {
+                    Id = Guid.NewGuid(),
+                    Title = title.Trim(),
+                    Subtitle = subtitle?.Trim() ?? string.Empty,
+                    Date = eventDate,
+                    ParticipantIds = new List<Guid>(),
+                    ParticipantsDisplay = "Ei osallistujia"
+                };
                 events.Add(ev);
             }
             else if (IsUserView)
@@ -127,7 +313,13 @@ namespace Group_2
                 var name = await DisplayPromptAsync("Uusi k‰ytt‰j‰", "Nimi:");
                 if (string.IsNullOrWhiteSpace(name)) return;
                 var email = await DisplayPromptAsync("Uusi k‰ytt‰j‰", "S‰hkˆposti:");
-                var u = new User { Name = name.Trim(), Email = email?.Trim() ?? string.Empty };
+                var u = new User
+                {
+                    Id = Guid.NewGuid(),
+                    Name = name.Trim(),
+                    Email = email?.Trim() ?? string.Empty,
+                    Role = string.Empty
+                };
                 users.Add(u);
             }
 
@@ -198,8 +390,7 @@ namespace Group_2
                         (ev.Title ?? string.Empty).ToLower().Contains(text) ||
                         (ev.Subtitle ?? string.Empty).ToLower().Contains(text);
                 }
-                // If your UI binds to events directly, ensure your CollectionView/ListView uses a CollectionViewSource or similar to filter by IsVisible
-                // Or, alternatively, update the ItemsSource to a filtered collection here
+                // CollectionView doesn't automatically filter by IsVisible ó implement filtering if needed
             }
             else if (IsUserView)
             {
@@ -229,19 +420,46 @@ namespace Group_2
 
         private async void OnAddParticipantsClicked(object sender, EventArgs e)
         {
+            // Updated: support both pre-selected users and modal selection
             var selectedEvent = SelectedEvent;
-            var selectedUsers = SelectedUsers?.ToList() ?? new();
-
-            if (selectedEvent == null || !selectedUsers.Any())
+            if (selectedEvent == null)
             {
-                await DisplayAlert("Virhe", "Valitse tapahtuma ja v‰hint‰‰n yksi k‰ytt‰j‰.", "OK");
+                await DisplayAlert("Virhe", "Valitse tapahtuma jolle haluat lis‰t‰ osallistujia.", "OK");
                 return;
             }
 
-            foreach (var user in selectedUsers)
+            // If user(s) are selected from the Users view, use them
+            var selectedUsersList = SelectedUsers?.ToList() ?? new List<User>();
+
+            List<Guid> usersToAddIds;
+
+            if (selectedUsersList.Any())
             {
-                if (!selectedEvent.ParticipantIds.Contains(user.Id))
-                    selectedEvent.ParticipantIds.Add(user.Id);
+                usersToAddIds = selectedUsersList.Select(u => u.Id).ToList();
+            }
+            else
+            {
+                // No users preselected ó open modal selection (reuse existing dialog)
+                var currently = selectedEvent.ParticipantIds ?? new List<Guid>();
+                var picked = await ShowParticipantSelectionDialogAsync(currently);
+                // ShowParticipantSelectionDialogAsync returns the full selected set ó we want new additions
+                usersToAddIds = picked.Except(currently).ToList();
+            }
+
+            if (!usersToAddIds.Any())
+            {
+                await DisplayAlert("Virhe", "Valitse v‰hint‰‰n yksi k‰ytt‰j‰.", "OK");
+                return;
+            }
+
+            // Add unique ids to the event
+            if (selectedEvent.ParticipantIds == null)
+                selectedEvent.ParticipantIds = new List<Guid>();
+
+            foreach (var uid in usersToAddIds)
+            {
+                if (!selectedEvent.ParticipantIds.Contains(uid))
+                    selectedEvent.ParticipantIds.Add(uid);
             }
 
             var names = selectedEvent.ParticipantIds != null
@@ -321,19 +539,27 @@ namespace Group_2
             return collectionView.SelectedItems.Cast<User>().Select(u => u.Id).ToList();
         }
 
-        public new event PropertyChangedEventHandler? PropertyChanged;
-        protected new void OnPropertyChanged(string propertyName)
+        // Add this method to AdminPanelPage (temporary diagnostic)
+        private async Task ShowJoinTableDebugAsync()
         {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            try
+            {
+                var joins = await DatabaseService.LoadJoinsAsync();
+                var lines = joins.Select(j => $"Event={j.EventId}, User={j.UserId}").ToList();
+                var text = lines.Any() ? string.Join("\n", lines) : "(no rows)";
+                await ShowExceptionDialogAsync("ilmoittautuminen rows", text);
+            }
+            catch (Exception ex)
+            {
+                await ShowExceptionDialogAsync("LoadJoins failed", ex.ToString());
+            }
         }
     }
 
     public class NullToBoolConverter : IValueConverter
     {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-            => value != null;
-
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-            => throw new NotImplementedException();
+        public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => value != null;
+        public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotImplementedException();
     }
+
 }

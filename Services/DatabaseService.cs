@@ -1,53 +1,317 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text.Json;
 using System.Threading.Tasks;
+using MySqlConnector;
 using Group_2.Models;
-using Microsoft.Maui.Storage;
+using System.Diagnostics;
 
 namespace Group_2.Services
 {
-    // Simple JSON-backed persistence for development/demo purposes
+    public static class Database
+    {
+        // Päivitä SALASANA oikeaksi
+        // HUOM: Jokaisen tiimin jäsenen tulee muokata tähän oma tietokantayhteys
+        // 🔒 HUOM!
+        // Älä lisää omaa salasanaa julkiseen GitHub-repoon.
+        // Jokainen tiimin jäsen muokkaa tämän rivin omaan koneeseensa.
+        // Esimerkki MariaDB-yhteydestä:
+        // "Server=127.0.0.1;Port=3307;Database=tapahtumat;User Id=root;Password=omaSalasana;SslMode=None;CharSet=utf8mb4";
+
+        public const string ConnString =
+            "Server=127.0.0.1;Port=3307;Database=tapahtumat;User Id=root;Password=;SslMode=None;CharSet=utf8mb4";
+    }
+
     public static class DatabaseService
     {
-        static readonly JsonSerializerOptions opts = new JsonSerializerOptions { WriteIndented = true };
+        private static string FullError(Exception ex) => ex.ToString();
 
-        static string EventsFile => Path.Combine(FileSystem.AppDataDirectory, "events.json");
-        static string UsersFile => Path.Combine(FileSystem.AppDataDirectory, "users.json");
+        public static async Task EnsureSchemaAsync()
+        {
+            using var conn = new MySqlConnection(Database.ConnString);
+            await conn.OpenAsync();
 
-        public static async Task<List<Event>> LoadEventsAsync()
+            var stmts = new[]
+            {
+@"CREATE TABLE IF NOT EXISTS `kayttaja` (
+  `user_id` CHAR(36) PRIMARY KEY,
+  `nimi` VARCHAR(100) NOT NULL,
+  `sahkoposti` VARCHAR(255) NOT NULL,
+  UNIQUE KEY `sahkoposti` (`sahkoposti`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;",
+@"CREATE TABLE IF NOT EXISTS `tapahtuma` (
+  `event_id` CHAR(36) PRIMARY KEY,
+  `otsikko` VARCHAR(200) NOT NULL,
+  `kuvaus` TEXT DEFAULT NULL,
+  `paivamaara` DATE NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;",
+@"CREATE TABLE IF NOT EXISTS `ilmoittautuminen` (
+  `event_id` CHAR(36) NOT NULL,
+  `user_id` CHAR(36) NOT NULL,
+  PRIMARY KEY(`event_id`,`user_id`),
+  KEY `fk_ilmo_user` (`user_id`),
+  CONSTRAINT `fk_ilmo_event` FOREIGN KEY(`event_id`) REFERENCES `tapahtuma`(`event_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_ilmo_user` FOREIGN KEY(`user_id`) REFERENCES `kayttaja`(`user_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;"
+            };
+
+            foreach (var sql in stmts)
+            {
+                using var cmd = new MySqlCommand(sql, conn);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        // Quick helper to surface connection errors (returns null on success or exception text)
+        public static async Task<string?> TestConnectionAsync()
         {
             try
             {
-                if (!File.Exists(EventsFile)) return new();
-                var json = await File.ReadAllTextAsync(EventsFile);
-                return JsonSerializer.Deserialize<List<Event>>(json, opts) ?? new();
+                using var conn = new MySqlConnection(Database.ConnString);
+                await conn.OpenAsync();
+                await conn.CloseAsync();
+                return null;
             }
-            catch { return new(); }
+            catch (Exception ex)
+            {
+                return FullError(ex);
+            }
         }
 
-        public static async Task SaveEventsAsync(List<Event> items)
+        // Helper: read Guid from reader even if underlying type is Guid or string
+        private static Guid ReadGuid(MySqlDataReader rd, int index)
         {
-            var json = JsonSerializer.Serialize(items, opts);
-            await File.WriteAllTextAsync(EventsFile, json);
+            var val = rd.GetValue(index);
+            if (val is Guid g) return g;
+            if (val is string s) return Guid.Parse(s);
+            // fallback
+            return Guid.Parse(Convert.ToString(val) ?? Guid.Empty.ToString());
         }
 
+        // ---------- USERS ----------
         public static async Task<List<User>> LoadUsersAsync()
         {
-            try
+            var list = new List<User>();
+            using var conn = new MySqlConnection(Database.ConnString);
+            await conn.OpenAsync();
+            const string sql = "SELECT `user_id`, `nimi`, `sahkoposti` FROM `kayttaja` ORDER BY `nimi`";
+            using var cmd = new MySqlCommand(sql, conn);
+            using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
             {
-                if (!File.Exists(UsersFile)) return new();
-                var json = await File.ReadAllTextAsync(UsersFile);
-                return JsonSerializer.Deserialize<List<User>>(json, opts) ?? new();
+                list.Add(new User
+                {
+                    Id = ReadGuid(rd, 0),
+                    Name = rd.GetString(1),
+                    Email = rd.GetString(2)
+                });
             }
-            catch { return new(); }
+            return list;
         }
 
-        public static async Task SaveUsersAsync(List<User> items)
+        public static async Task SaveUsersAsync(List<User> users)
         {
-            var json = JsonSerializer.Serialize(items, opts);
-            await File.WriteAllTextAsync(UsersFile, json);
+            using var conn = new MySqlConnection(Database.ConnString);
+            await conn.OpenAsync();
+            using var tx = await conn.BeginTransactionAsync();
+
+            try
+            {
+                using (var del = new MySqlCommand("DELETE FROM `kayttaja`", conn, (MySqlTransaction)tx))
+                    await del.ExecuteNonQueryAsync();
+
+                const string ins = "INSERT INTO `kayttaja` (`user_id`, `nimi`, `sahkoposti`) VALUES(@Id,@Name,@Email)";
+                foreach (var u in users)
+                {
+                    using var cmd = new MySqlCommand(ins, conn, (MySqlTransaction)tx);
+                    cmd.Parameters.AddWithValue("@Id", u.Id.ToString());
+                    cmd.Parameters.AddWithValue("@Name", u.Name ?? "");
+                    cmd.Parameters.AddWithValue("@Email", u.Email ?? "");
+
+                    Debug.WriteLine("Executing SQL: " + cmd.CommandText);
+                    foreach (MySqlParameter p in cmd.Parameters)
+                        Debug.WriteLine($"Param: {p.ParameterName} = {p.Value}");
+
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                await tx.CommitAsync();
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
+        }
+
+        // ---------- EVENTS ----------
+        public static async Task<List<Event>> LoadEventsAsync()
+        {
+            var list = new List<Event>();
+            using var conn = new MySqlConnection(Database.ConnString);
+            await conn.OpenAsync();
+
+            const string sqlEvt = @"
+SELECT
+  t.`event_id`,
+  t.`otsikko`,
+  t.`kuvaus`,
+  t.`paivamaara`,
+  GROUP_CONCAT(i.`user_id` SEPARATOR ',') AS user_ids
+FROM `tapahtuma` t
+LEFT JOIN `ilmoittautuminen` i ON t.`event_id` = i.`event_id`
+GROUP BY t.`event_id`, t.`otsikko`, t.`kuvaus`, t.`paivamaara`
+ORDER BY t.`paivamaara` DESC;
+";
+
+            using (var cmd = new MySqlCommand(sqlEvt, conn))
+            using (var rd = await cmd.ExecuteReaderAsync())
+            {
+                while (await rd.ReadAsync())
+                {
+                    var eventId = ReadGuid(rd, 0);
+                    var title = rd.IsDBNull(1) ? string.Empty : rd.GetString(1);
+                    var subtitle = rd.IsDBNull(2) ? string.Empty : rd.GetString(2);
+                    var date = rd.GetDateTime(3);
+
+                    List<Guid> participantIds = new();
+                    if (!rd.IsDBNull(4))
+                    {
+                        var joined = rd.GetString(4); // comma-separated ids
+                        if (!string.IsNullOrWhiteSpace(joined))
+                        {
+                            var parts = joined.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                            foreach (var p in parts)
+                            {
+                                if (Guid.TryParse(p, out var g)) participantIds.Add(g);
+                            }
+                        }
+                    }
+
+                    list.Add(new Event
+                    {
+                        Id = eventId,
+                        Title = title,
+                        Subtitle = subtitle,
+                        Date = date,
+                        ParticipantIds = participantIds
+                    });
+                }
+            }
+
+            return list;
+        }
+
+        public static async Task SaveEventsAsync(List<Event> events)
+        {
+            using var conn = new MySqlConnection(Database.ConnString);
+            await conn.OpenAsync();
+            using var tx = await conn.BeginTransactionAsync();
+
+            try
+            {
+                // Do NOT delete the entire join table. Process events one-by-one:
+                const string delEvent = "DELETE FROM `tapahtuma` WHERE `event_id` = @Id";
+                const string insEvt = "INSERT INTO `tapahtuma` (`event_id`, `otsikko`, `kuvaus`, `paivamaara`) VALUES(@Id,@Title,@Subtitle,@EventDate)";
+                const string delJoinsForEvent = "DELETE FROM `ilmoittautuminen` WHERE `event_id` = @E";
+                const string insMap = "INSERT INTO `ilmoittautuminen` (`event_id`, `user_id`) VALUES(@E,@U)";
+
+                foreach (var e in events)
+                {
+                    // remove existing event row (and its FK rows will be removed by cascade if configured)
+                    using (var cmdDelEvt = new MySqlCommand(delEvent, conn, (MySqlTransaction)tx))
+                    {
+                        cmdDelEvt.Parameters.AddWithValue("@Id", e.Id.ToString());
+                        await cmdDelEvt.ExecuteNonQueryAsync();
+                    }
+
+                    // insert event
+                    using (var cmd = new MySqlCommand(insEvt, conn, (MySqlTransaction)tx))
+                    {
+                        cmd.Parameters.AddWithValue("@Id", e.Id.ToString());
+                        cmd.Parameters.AddWithValue("@Title", e.Title ?? "");
+                        cmd.Parameters.AddWithValue("@Subtitle", e.Subtitle ?? "");
+                        cmd.Parameters.AddWithValue("@EventDate", e.Date.Date);
+
+                        Debug.WriteLine("Executing SQL: " + cmd.CommandText);
+                        foreach (MySqlParameter p in cmd.Parameters)
+                            Debug.WriteLine($"Param: {p.ParameterName} = {p.Value}");
+
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+
+                    // remove existing joins for this event only
+                    using (var cmdDelJoins = new MySqlCommand(delJoinsForEvent, conn, (MySqlTransaction)tx))
+                    {
+                        cmdDelJoins.Parameters.AddWithValue("@E", e.Id.ToString());
+                        await cmdDelJoins.ExecuteNonQueryAsync();
+                    }
+
+                    // insert new joins for this event
+                    if (e.ParticipantIds != null)
+                    {
+                        foreach (var uId in e.ParticipantIds)
+                        {
+                            using var cmd = new MySqlCommand(insMap, conn, (MySqlTransaction)tx);
+                            cmd.Parameters.AddWithValue("@E", e.Id.ToString());
+                            cmd.Parameters.AddWithValue("@U", uId.ToString());
+
+                            Debug.WriteLine("Executing SQL: " + cmd.CommandText);
+                            foreach (MySqlParameter p in cmd.Parameters)
+                                Debug.WriteLine($"Param: {p.ParameterName} = {p.Value}");
+
+                            await cmd.ExecuteNonQueryAsync();
+                        }
+                    }
+                }
+
+                await tx.CommitAsync();
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                Debug.WriteLine("SaveEventsAsync exception: " + ex);
+                throw;
+            }
+        }
+
+        public static async Task<(long users, long events, long joins)> SelfTestCountsAsync()
+        {
+            using var conn = new MySqlConnection(Database.ConnString);
+            await conn.OpenAsync();
+
+            async Task<long> CountAsync(string table)
+            {
+                using var cmd = new MySqlCommand($"SELECT COUNT(*) FROM `{table}`", conn);
+                var o = await cmd.ExecuteScalarAsync();
+                return (o is long l) ? l : Convert.ToInt64(o);
+            }
+
+            var u = await CountAsync("kayttaja");
+            var e = await CountAsync("tapahtuma");
+            var j = await CountAsync("ilmoittautuminen");
+            return (u, e, j);
+        }
+
+        // Add this helper method to DatabaseService (near other Load... methods)
+        public static async Task<List<(Guid EventId, Guid UserId)>> LoadJoinsAsync()
+        {
+            var list = new List<(Guid, Guid)>();
+            using var conn = new MySqlConnection(Database.ConnString);
+            await conn.OpenAsync();
+            const string sql = "SELECT `event_id`, `user_id` FROM `ilmoittautuminen`";
+            using var cmd = new MySqlCommand(sql, conn);
+            using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                Guid eId;
+                Guid uId;
+                var val0 = rd.GetValue(0);
+                if (val0 is Guid g0) eId = g0; else eId = Guid.Parse(Convert.ToString(val0)!);
+                var val1 = rd.GetValue(1);
+                if (val1 is Guid g1) uId = g1; else uId = Guid.Parse(Convert.ToString(val1)!);
+                list.Add((eId, uId));
+            }
+            return list;
         }
     }
 }
