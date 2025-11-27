@@ -1,0 +1,69 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Group_2.CalendarPage"
+             BackgroundColor="#80000000">
+
+    <Border HeightRequest="800" WidthRequest="600" StrokeThickness="0" StrokeShape="RoundRectangle 32">
+        <Grid>
+            <VerticalStackLayout Padding="16" Spacing="10">
+
+                <Label Text="Valitse päivä" FontAttributes="Bold" FontSize="26"/>
+                
+                <HorizontalStackLayout Spacing="15">
+                    <DatePicker x:Name="DatePick" 
+                            DateSelected="OnDateSelected" 
+                            WidthRequest="255" 
+                            HeightRequest="50"
+                            BackgroundColor="White"
+                                TextColor="Black"
+                            HorizontalOptions="Start"/>
+                    <SearchBar x:Name="SearchBar"
+                               Placeholder="Hae..."
+                               TextChanged="OnSearchTextChanged"
+                               WidthRequest="255"
+                               BackgroundColor="White"
+                               TextColor="Black"/>
+                </HorizontalStackLayout>
+
+                <CollectionView x:Name="DayEvents" HeightRequest="600">
+                    <CollectionView.EmptyView>
+                        <Label Text="Ei tapahtumia tälle päivälle." FontSize="22" />
+                    </CollectionView.EmptyView>
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Padding="8" ColumnDefinitions="*,Auto,Auto">
+                                <VerticalStackLayout>
+                                    <Label Text="{Binding Title}" FontAttributes="Bold" />
+                                    <Label Text="{Binding Description}" FontSize="12" />
+                                    <Label Text="{Binding StartDate, StringFormat='Alkaa: {0:dd.MM.yyyy}'}" FontSize="11" />
+                                    <Label Text="{Binding EndDate, StringFormat='Päättyy: {0:dd.MM.yyyy}'}" FontSize="11" />
+                                    <Label Text="{Binding ParticipantsDisplay}" FontSize="12" TextColor="Gray" Margin="0,10,0,0"/>
+                                </VerticalStackLayout>
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </VerticalStackLayout>
+
+            <Button Text="✕"
+                BackgroundColor="Transparent"
+                TextColor="Black"
+                Clicked="OnCloseClicked"
+                VerticalOptions="Start"
+                HorizontalOptions="End"
+                FontSize="Medium"/>
+            
+        </Grid>
+
+        <Border.Shadow>
+            <Shadow
+                        Brush="Black"
+                        Offset="0,0"
+                        Radius="25"
+                        Opacity="0.5" />
+        </Border.Shadow>
+        
+    </Border>
+
+</ContentPage>

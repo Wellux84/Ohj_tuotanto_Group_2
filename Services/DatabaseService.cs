@@ -18,7 +18,7 @@ namespace Group_2.Services
         // "Server=127.0.0.1;Port=3307;Database=tapahtumat;User Id=root;Password=omaSalasana;SslMode=None;CharSet=utf8mb4";
 
         public const string ConnString =
-            "Server=127.0.0.1;Port=3307;Database=tapahtumat;User Id=root;Password=;SslMode=None;CharSet=utf8mb4";
+            "Server=127.0.0.1;Port=3307;Database=tapahtumat;User Id=root;Password=uusiSalasana;SslMode=None;CharSet=utf8mb4";
     }
 
     public static class DatabaseService
@@ -38,12 +38,15 @@ namespace Group_2.Services
   `sahkoposti` VARCHAR(255) NOT NULL,
   UNIQUE KEY `sahkoposti` (`sahkoposti`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;",
+
 @"CREATE TABLE IF NOT EXISTS `tapahtuma` (
   `event_id` CHAR(36) PRIMARY KEY,
   `otsikko` VARCHAR(200) NOT NULL,
   `kuvaus` TEXT DEFAULT NULL,
-  `paivamaara` DATE NOT NULL
+  `paivamaara` DATE NOT NULL,
+  `loppupaivamaara` DATE NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;",
+
 @"CREATE TABLE IF NOT EXISTS `ilmoittautuminen` (
   `event_id` CHAR(36) NOT NULL,
   `user_id` CHAR(36) NOT NULL,
@@ -116,13 +119,18 @@ namespace Group_2.Services
 
             try
             {
-                using (var del = new MySqlCommand("DELETE FROM `kayttaja`", conn, (MySqlTransaction)tx))
-                    await del.ExecuteNonQueryAsync();
+                // EI ENÄÄ DELETE FROM kayttaja → ei tuhoa ilmoittautumisia CASCADElla
 
-                const string ins = "INSERT INTO `kayttaja` (`user_id`, `nimi`, `sahkoposti`) VALUES(@Id,@Name,@Email)";
+                const string upsert = @"
+INSERT INTO `kayttaja` (`user_id`, `nimi`, `sahkoposti`)
+VALUES (@Id, @Name, @Email)
+ON DUPLICATE KEY UPDATE
+  `nimi` = VALUES(`nimi`),
+  `sahkoposti` = VALUES(`sahkoposti`);";
+
                 foreach (var u in users)
                 {
-                    using var cmd = new MySqlCommand(ins, conn, (MySqlTransaction)tx);
+                    using var cmd = new MySqlCommand(upsert, conn, (MySqlTransaction)tx);
                     cmd.Parameters.AddWithValue("@Id", u.Id.ToString());
                     cmd.Parameters.AddWithValue("@Name", u.Name ?? "");
                     cmd.Parameters.AddWithValue("@Email", u.Email ?? "");
@@ -136,12 +144,15 @@ namespace Group_2.Services
 
                 await tx.CommitAsync();
             }
-            catch
+            catch (Exception ex)
             {
                 await tx.RollbackAsync();
+                Debug.WriteLine("SaveUsersAsync exception: " + ex);
                 throw;
             }
         }
+
+
 
         // ---------- EVENTS ----------
         public static async Task<List<Event>> LoadEventsAsync()
@@ -156,10 +167,11 @@ SELECT
   t.`otsikko`,
   t.`kuvaus`,
   t.`paivamaara`,
+  t.`loppupaivamaara`,
   GROUP_CONCAT(i.`user_id` SEPARATOR ',') AS user_ids
 FROM `tapahtuma` t
 LEFT JOIN `ilmoittautuminen` i ON t.`event_id` = i.`event_id`
-GROUP BY t.`event_id`, t.`otsikko`, t.`kuvaus`, t.`paivamaara`
+GROUP BY t.`event_id`, t.`otsikko`, t.`kuvaus`, t.`paivamaara`, t.`loppupaivamaara`
 ORDER BY t.`paivamaara` DESC;
 ";
 
@@ -171,12 +183,13 @@ ORDER BY t.`paivamaara` DESC;
                     var eventId = ReadGuid(rd, 0);
                     var title = rd.IsDBNull(1) ? string.Empty : rd.GetString(1);
                     var subtitle = rd.IsDBNull(2) ? string.Empty : rd.GetString(2);
-                    var date = rd.GetDateTime(3);
+                    var date = rd.GetDateTime(3); // alkupäivä
+                    var endDate = rd.GetDateTime(4); // loppupäivä
 
                     List<Guid> participantIds = new();
-                    if (!rd.IsDBNull(4))
+                    if (!rd.IsDBNull(5)) // user_ids on nyt indeksissä 5
                     {
-                        var joined = rd.GetString(4); // comma-separated ids
+                        var joined = rd.GetString(5); // comma-separated ids
                         if (!string.IsNullOrWhiteSpace(joined))
                         {
                             var parts = joined.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -193,6 +206,7 @@ ORDER BY t.`paivamaara` DESC;
                         Title = title,
                         Subtitle = subtitle,
                         Date = date,
+                        EndDate = endDate,          // tärkeä: talletetaan loppupäivä
                         ParticipantIds = participantIds
                     });
                 }
@@ -200,6 +214,7 @@ ORDER BY t.`paivamaara` DESC;
 
             return list;
         }
+
 
         public static async Task SaveEventsAsync(List<Event> events)
         {
@@ -209,28 +224,34 @@ ORDER BY t.`paivamaara` DESC;
 
             try
             {
-                // Do NOT delete the entire join table. Process events one-by-one:
+                // Yksittäiset komennot
                 const string delEvent = "DELETE FROM `tapahtuma` WHERE `event_id` = @Id";
-                const string insEvt = "INSERT INTO `tapahtuma` (`event_id`, `otsikko`, `kuvaus`, `paivamaara`) VALUES(@Id,@Title,@Subtitle,@EventDate)";
+
+                const string insEvt = @"
+INSERT INTO `tapahtuma`
+(`event_id`, `otsikko`, `kuvaus`, `paivamaara`, `loppupaivamaara`)
+VALUES (@Id, @Title, @Subtitle, @EventDate, @EndDate);";
+
                 const string delJoinsForEvent = "DELETE FROM `ilmoittautuminen` WHERE `event_id` = @E";
                 const string insMap = "INSERT INTO `ilmoittautuminen` (`event_id`, `user_id`) VALUES(@E,@U)";
 
                 foreach (var e in events)
                 {
-                    // remove existing event row (and its FK rows will be removed by cascade if configured)
+                    // Poista vanha event-rivi
                     using (var cmdDelEvt = new MySqlCommand(delEvent, conn, (MySqlTransaction)tx))
                     {
                         cmdDelEvt.Parameters.AddWithValue("@Id", e.Id.ToString());
                         await cmdDelEvt.ExecuteNonQueryAsync();
                     }
 
-                    // insert event
+                    // Lisää uusi event-rivi
                     using (var cmd = new MySqlCommand(insEvt, conn, (MySqlTransaction)tx))
                     {
                         cmd.Parameters.AddWithValue("@Id", e.Id.ToString());
                         cmd.Parameters.AddWithValue("@Title", e.Title ?? "");
                         cmd.Parameters.AddWithValue("@Subtitle", e.Subtitle ?? "");
                         cmd.Parameters.AddWithValue("@EventDate", e.Date.Date);
+                        cmd.Parameters.AddWithValue("@EndDate", e.EndDate.Date);
 
                         Debug.WriteLine("Executing SQL: " + cmd.CommandText);
                         foreach (MySqlParameter p in cmd.Parameters)
@@ -239,14 +260,14 @@ ORDER BY t.`paivamaara` DESC;
                         await cmd.ExecuteNonQueryAsync();
                     }
 
-                    // remove existing joins for this event only
+                    // Poista vanhat ilmoittautumiset tälle eventille
                     using (var cmdDelJoins = new MySqlCommand(delJoinsForEvent, conn, (MySqlTransaction)tx))
                     {
                         cmdDelJoins.Parameters.AddWithValue("@E", e.Id.ToString());
                         await cmdDelJoins.ExecuteNonQueryAsync();
                     }
 
-                    // insert new joins for this event
+                    // Lisää uudet ilmoittautumiset
                     if (e.ParticipantIds != null)
                     {
                         foreach (var uId in e.ParticipantIds)
@@ -273,6 +294,7 @@ ORDER BY t.`paivamaara` DESC;
                 throw;
             }
         }
+
 
         public static async Task<(long users, long events, long joins)> SelfTestCountsAsync()
         {
@@ -313,5 +335,84 @@ ORDER BY t.`paivamaara` DESC;
             }
             return list;
         }
+
+        public static async Task DeleteEventAsync(Guid eventId)
+        {
+            using var conn = new MySqlConnection(Database.ConnString);
+            await conn.OpenAsync();
+
+            using var tx = await conn.BeginTransactionAsync();
+            try
+            {
+                // Voi riittää pelkkä tapahtuma, koska FK ON DELETE CASCADE hoitaa ilmoittautumiset
+                // mutta tehdään selkeästi molemmat.
+
+                // Poista ilmoittautumiset tälle eventille
+                using (var cmdDelJoins = new MySqlCommand(
+                           "DELETE FROM `ilmoittautuminen` WHERE `event_id` = @Id",
+                           conn,
+                           (MySqlTransaction)tx))
+                {
+                    cmdDelJoins.Parameters.AddWithValue("@Id", eventId.ToString());
+                    await cmdDelJoins.ExecuteNonQueryAsync();
+                }
+
+                // Poista itse tapahtuma
+                using (var cmdDelEvt = new MySqlCommand(
+                           "DELETE FROM `tapahtuma` WHERE `event_id` = @Id",
+                           conn,
+                           (MySqlTransaction)tx))
+                {
+                    cmdDelEvt.Parameters.AddWithValue("@Id", eventId.ToString());
+                    await cmdDelEvt.ExecuteNonQueryAsync();
+                }
+
+                await tx.CommitAsync();
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
+        }
+
+        public static async Task DeleteUserAsync(Guid userId)
+        {
+            using var conn = new MySqlConnection(Database.ConnString);
+            await conn.OpenAsync();
+
+            using var tx = await conn.BeginTransactionAsync();
+            try
+            {
+                // Poista ilmoittautumiset tältä käyttäjältä
+                using (var cmdDelJoins = new MySqlCommand(
+                           "DELETE FROM `ilmoittautuminen` WHERE `user_id` = @Id",
+                           conn,
+                           (MySqlTransaction)tx))
+                {
+                    cmdDelJoins.Parameters.AddWithValue("@Id", userId.ToString());
+                    await cmdDelJoins.ExecuteNonQueryAsync();
+                }
+
+                // Poista käyttäjä
+                using (var cmdDelUser = new MySqlCommand(
+                           "DELETE FROM `kayttaja` WHERE `user_id` = @Id",
+                           conn,
+                           (MySqlTransaction)tx))
+                {
+                    cmdDelUser.Parameters.AddWithValue("@Id", userId.ToString());
+                    await cmdDelUser.ExecuteNonQueryAsync();
+                }
+
+                await tx.CommitAsync();
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
+        }
+
     }
 }
+

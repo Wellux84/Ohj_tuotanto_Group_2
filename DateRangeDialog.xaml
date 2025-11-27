@@ -1,0 +1,89 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Group_2.DateRangeDialog"
+             Title="Valitse päivät"
+             BackgroundColor="#80000000">
+
+    <Border 
+        HeightRequest="400"
+        WidthRequest="475"
+        StrokeThickness="0" 
+        StrokeShape="RoundRectangle 32">
+        <VerticalStackLayout>
+            
+            <Label Text="Valitse päivät"
+                   HorizontalOptions="Center"
+                   VerticalOptions="Start"
+                   FontSize="28"
+                   FontAttributes="Bold"/>
+            <Label Text="Alkupäivä"
+                   FontSize="Medium"
+                   HorizontalOptions="Start"
+                   VerticalOptions="Center"
+                   Margin="25,25,0,0"/>
+            
+            <DatePicker x:Name="StartPick" 
+                        WidthRequest="200"
+                        HorizontalOptions="Start"
+                        Margin="25,0,0,0"
+                        TextColor="Black"
+                        BackgroundColor="White"/>
+            
+            <Label Text="Loppupäivä"
+                   FontSize="Medium"
+                   HorizontalOptions="Start"
+                   VerticalOptions="Center"
+                   Margin="25,15,0,0"/>
+
+            <DatePicker x:Name="EndPick" 
+                        WidthRequest="200"
+                        HorizontalOptions="Start"
+                        Margin="25,0,0,0"
+                        TextColor="Black"
+                        BackgroundColor="White"/>
+
+            <HorizontalStackLayout Spacing="15" HorizontalOptions="Center" VerticalOptions="End"
+                                   Margin="50">
+                <Button Text="OK" Clicked="OnOk" 
+                    WidthRequest="150"
+                    HeightRequest="50"
+                    VerticalOptions="End"
+                    HorizontalOptions="Start">
+
+                    <Button.Shadow>
+                        <Shadow
+                        Brush="Black"
+                        Offset="0,0"
+                        Radius="10"
+                        Opacity="0.25"/>
+                    </Button.Shadow>
+                </Button>
+
+                <Button Text="Cancel" Clicked="OnCancel"
+                    WidthRequest="150"
+                    HeightRequest="50"
+                    VerticalOptions="End"
+                    HorizontalOptions="Start">
+
+                    <Button.Shadow>
+                        <Shadow
+                        Brush="Black"
+                        Offset="0,0"
+                        Radius="10"
+                        Opacity="0.25"/>
+                    </Button.Shadow>
+                </Button>
+            </HorizontalStackLayout>
+        </VerticalStackLayout>
+
+        <Border.Shadow>
+            <Shadow
+                        Brush="Black"
+                        Offset="0,0"
+                        Radius="25"
+                        Opacity="0.5" />
+        </Border.Shadow>
+    </Border>
+
+</ContentPage>

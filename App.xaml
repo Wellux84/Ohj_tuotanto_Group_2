@@ -10,8 +10,6 @@
                 <ResourceDictionary Source="Resources/Styles/Styles.xaml" />
                 <ResourceDictionary Source="Resources/Styles/AppStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            <!-- Make sure SelectedEventBackgroundConverter exists in Group_2 namespace -->
-            <local:SelectedEventBackgroundConverter x:Key="SelectedEventBackgroundConverter" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

@@ -9,12 +9,14 @@ namespace Group_2
         public AppShell()
         {
             InitializeComponent();
+
             var currentTheme = Application.Current!.RequestedTheme;
             ThemeSegmentedControl.SelectedIndex = currentTheme == AppTheme.Light ? 0 : 1;
         }
+
         public static async Task DisplaySnackbarAsync(string message)
         {
-            CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+            using var cancellationTokenSource = new CancellationTokenSource();
 
             var snackbarOptions = new SnackbarOptions
             {
@@ -27,19 +29,16 @@ namespace Group_2
             };
 
             var snackbar = Snackbar.Make(message, visualOptions: snackbarOptions);
-
             await snackbar.Show(cancellationTokenSource.Token);
         }
 
         public static async Task DisplayToastAsync(string message)
         {
-            // Toast is currently not working in MCT on Windows
             if (OperatingSystem.IsWindows())
                 return;
 
             var toast = Toast.Make(message, textSize: 18);
-
-            var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await toast.Show(cts.Token);
         }
 

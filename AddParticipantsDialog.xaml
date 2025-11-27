@@ -1,0 +1,73 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:Group_2"
+             x:Class="Group_2.AddParticipantsDialog"
+             Title="Valitse osallistujat"
+             BackgroundColor="#80000000">
+
+    <ContentPage.Resources>
+        <local:EmailFallbackConverter x:Key="EmailFallbackConverter"/>
+    </ContentPage.Resources>
+    
+    <Border 
+        HeightRequest="400"
+        WidthRequest="475"
+        StrokeThickness="0" 
+        StrokeShape="RoundRectangle 32">
+
+        <VerticalStackLayout Padding="16" Spacing="12">
+            <Label Text="Valitse käyttäjät" FontAttributes="Bold" FontSize="28"
+                   HorizontalOptions="Center"
+                   VerticalOptions="Start"/>
+            <CollectionView x:Name="UsersView"
+                        SelectionMode="Multiple"
+                        HeightRequest="175"
+                        Margin="0,15,0,0">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Padding="10">
+                            <Label Text="{Binding Name}" FontSize="16" HorizontalOptions="Start"/>
+                            <Label Text="{Binding Email, Converter={StaticResource EmailFallbackConverter}}" FontSize="12" TextColor="Gray" VerticalOptions="Center" HorizontalOptions="End"/>
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <HorizontalStackLayout Spacing="25" VerticalOptions="End" HorizontalOptions="Center">
+                <Button Text="OK" Clicked="OnOk" WidthRequest="150" HeightRequest="50">
+
+                    <Button.Shadow>
+                        <Shadow
+                        Brush="Black"
+                        Offset="0,0"
+                        Radius="10"
+                        Opacity="0.25"/>
+                    </Button.Shadow>
+                </Button>
+                
+                <Button Text="Peruuta" WidthRequest="150" HeightRequest="50" Clicked="OnCancel">
+
+                    <Button.Shadow>
+                        <Shadow
+                        Brush="Black"
+                        Offset="0,0"
+                        Radius="10"
+                        Opacity="0.25"/>
+                    </Button.Shadow>
+                </Button>
+                
+            </HorizontalStackLayout>
+
+        </VerticalStackLayout>
+
+        <Border.Shadow>
+            <Shadow
+                        Brush="Black"
+                        Offset="0,0"
+                        Radius="25"
+                        Opacity="0.5" />
+        </Border.Shadow>
+    </Border>
+
+</ContentPage>
